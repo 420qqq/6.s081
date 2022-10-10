@@ -77,8 +77,21 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2) {
+      p->ticks++;
+      if (p->ticks >= p->interval && p->alarm_fin == 1) {
+          p->alarm_fin = 0;
+          p->ticks = 0;
+          struct trapframe* tr = p->trapframe;
+          tr->kernel_satp = r_satp();         // kernel page table
+          tr->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+          tr->kernel_trap = (uint64)usertrap;
+          tr->kernel_hartid = r_tp();         // hartid for cpuid()
+          p->tmp = *tr;
+          tr->epc = (uint64)p->handler;
+      }
+      yield();
+  }
 
   usertrapret();
 }
