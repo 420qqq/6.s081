@@ -49,8 +49,50 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
+  if (r_scause() == 13 || r_scause() == 12 || r_scause() == 15) {
+      // page fault
+      uint64 va = r_stval();
+      if (va >= MAXVA) {
+          p->killed = 1;
+          exit(-1);
+      }
+      va = va - va % PGSIZE;
+      pagetable_t pt = p->pagetable;
+
+      pte_t *pte;
+      if((pte = walk(pt, va ,0)) == 0) {
+          p->killed = 1;
+          exit(-1);
+          //panic("trap: pte should exist");
+      }
+      if((*pte & PTE_V) == 0) {
+          p->killed = 1;
+          exit(-1);
+      }
+      if((*pte & PTE_COW) == 0) {
+          p->killed = 1;
+          exit(-1);
+          //panic("trap: page fault not with cow");
+      }
+      uint64 pa = PTE2PA(*pte);
+      *pte ^= PTE_COW;
+      *pte |= PTE_W;
+      uint flags = PTE_FLAGS(*pte);
+      char * mem;
+
+
+      if((mem = kalloc()) == 0) {
+          p->killed = 1;
+          exit(-1);
+      }
+      uvmunmap(pt, va, 1, 0);
+      memmove(mem, (char*)pa, PGSIZE);
+      if(mappages(pt, va, PGSIZE, (uint64)mem, flags) != 0){
+          kfree(mem);
+      }
+      kfree((void*)pa);
+  }
+  else if(r_scause() == 8){
     // system call
 
     if(p->killed)

@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define PA2INDEX(pa) (pa-0x80000000)/PGSIZE
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,6 +23,7 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  int ref_cnt[PA2INDEX(PHYSTOP)];
 } kmem;
 
 void
@@ -52,6 +55,14 @@ kfree(void *pa)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
+  acquire(&kmem.lock);
+  if (kmem.ref_cnt[PA2INDEX((uint64)pa)] > 1) {
+      kmem.ref_cnt[PA2INDEX((uint64)pa)]--;
+      release(&kmem.lock);
+      return;
+  }
+  release(&kmem.lock);
+
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
@@ -78,5 +89,19 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+  if (r) {
+      acquire(&kmem.lock);
+      kmem.ref_cnt[PA2INDEX((uint64)r)] = 1;
+      release(&kmem.lock);
+  }
   return (void*)r;
+}
+
+void
+add_ref(uint64 pa)
+{
+    acquire(&kmem.lock);
+    kmem.ref_cnt[PA2INDEX(pa)] ++;
+    release(&kmem.lock);
 }
