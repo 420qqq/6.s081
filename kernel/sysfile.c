@@ -316,6 +316,23 @@ sys_open(void)
     }
   }
 
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      struct inode* new_ip;
+      int cycle = 0;
+      while (ip->type == T_SYMLINK) {
+          ++cycle;
+          if (cycle > 10) {
+              iunlock(ip);
+              end_op();
+              return -1;
+          }
+          new_ip = (struct inode*)(*((uint64*)ip->addrs));
+          iunlock(ip);
+          ilock(new_ip);
+          ip = new_ip;
+      }
+  }
+
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
@@ -483,4 +500,41 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+    char target[MAXPATH];
+    char path[MAXPATH];
+    if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+        return -1;
+    }
+    struct inode *ip_t, *ip_p;
+
+    begin_op();
+    if ((ip_t = namei(target)) == 0) {
+        end_op();
+        return -1;
+    }
+    ilock(ip_t);
+    if (ip_t->type == T_DIR) {
+        iunlock(ip_t);
+        end_op();
+        return -1;
+    }
+    iunlock(ip_t);
+
+    // target is ok
+    ip_p = create(path, T_SYMLINK, 0, 0);
+    if(ip_p == 0){
+        end_op();
+        return -1;
+    }
+    ilock(ip_p);
+    *((uint64*)ip_p->addrs) = (uint64)ip_t;
+
+    iunlock(ip_p);
+    end_op();
+    return 0;
 }
