@@ -316,18 +316,23 @@ sys_open(void)
     }
   }
 
-  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+  if (ip->type == T_SYMLINK && (!(omode & O_NOFOLLOW))) {
       struct inode* new_ip;
+      char name[MAXPATH];
       int cycle = 0;
       while (ip->type == T_SYMLINK) {
           ++cycle;
           if (cycle > 10) {
-              iunlock(ip);
+              iunlockput(ip);
               end_op();
               return -1;
           }
-          new_ip = (struct inode*)(*((uint64*)ip->addrs));
-          iunlock(ip);
+          if (readi(ip, 0, (uint64)name, 0, MAXPATH) == 0 || (new_ip = namei(name)) == 0) {
+              iunlockput(ip);
+              end_op();
+              return -1;
+          }
+          iunlockput(ip);
           ilock(new_ip);
           ip = new_ip;
       }
@@ -510,31 +515,26 @@ sys_symlink(void)
     if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
         return -1;
     }
-    struct inode *ip_t, *ip_p;
-
+    struct inode *ip;
     begin_op();
-    if ((ip_t = namei(target)) == 0) {
-        end_op();
-        return -1;
-    }
-    ilock(ip_t);
-    if (ip_t->type == T_DIR) {
-        iunlock(ip_t);
-        end_op();
-        return -1;
-    }
-    iunlock(ip_t);
 
-    // target is ok
-    ip_p = create(path, T_SYMLINK, 0, 0);
-    if(ip_p == 0){
+    if ((ip = namei(path)) == 0) {
+        ip = create(path, T_SYMLINK, 0, 0);
+        if (ip == 0) {
+            end_op();
+            return -1;
+        }
+    }
+    else {
+        ilock(ip);
+    }
+    if (writei(ip, 0, (uint64)target, 0, MAXPATH) < 0) {
+        iunlockput(ip);
         end_op();
         return -1;
     }
-    ilock(ip_p);
-    *((uint64*)ip_p->addrs) = (uint64)ip_t;
-
-    iunlock(ip_p);
+    iupdate(ip);
+    iunlockput(ip);
     end_op();
     return 0;
 }
