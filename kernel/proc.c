@@ -141,6 +141,10 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  for (int i = 0; i < 16; ++i) {
+      p->mmaped[i].valid = 0;
+  }
+
   return p;
 }
 
