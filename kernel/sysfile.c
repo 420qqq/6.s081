@@ -484,39 +484,3 @@ sys_pipe(void)
   }
   return 0;
 }
-
-uint64
-sys_mmap(void)
-{
-    int length, fd, prot, flags;
-    uint64 va;
-
-    if (argint(1, &length) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(4, &fd) < 0) {
-        return -1;
-    }
-
-    struct proc* p = myproc();
-    //pagetable_t pagetable = p->pagetable;
-
-    //kvmmap(pagetable, va, length, 0, PTE_A | PTE_U);
-    //copyout(pagetable, va, src, length);
-
-    for (int i = 0; i < 16; ++i) {
-        struct vma* v = &p->mmaped[i];
-        if (v->valid == 0) {
-            v->valid = 1;
-            v->length = length;
-            v->address = 0;
-            break;
-        }
-    }
-
-    return va;
-}
-
-uint64
-sys_munmap(void)
-{
-
-    return 0;
-}

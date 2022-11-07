@@ -12,6 +12,7 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "fcntl.h"
 
 struct devsw devsw[NDEV];
 struct {
@@ -180,3 +181,86 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+uint64 mmap(uint64 address, int length, int prot, int flags, int fd, int offset) {
+    if (address + length > MAXVA) {
+        return -1;
+    }
+
+    struct proc* p = myproc();
+    struct vma* v;
+
+    for (int i = 0; i < 16; ++i) {
+        v = &p->mmaped[i];
+        if (v->valid == 0) {
+            v->file = p->ofile[fd];
+
+            v->flag = flags;
+            v->permission = 0;
+            if (prot & PROT_READ) {
+                if (v->file->readable == 0) {
+                    return -1;
+                }
+                v->permission |= PTE_R;
+            }
+            if (prot & PROT_WRITE) {
+                if (v->file->writable == 0 && flags == MAP_SHARED) {
+                    return -1;
+                }
+                v->permission |= PTE_W;
+            }
+            if (prot & PROT_EXEC) {
+                v->permission |= PTE_X;
+            }
+
+            v->valid = 1;
+            v->length = length;
+
+            uint64 addr = p->sz;
+            p->sz += length;
+            if (p->sz >= MAXVA) {
+                p->sz -= length;
+                return -1;
+            }
+
+            v->address = addr;
+            filedup(v->file);
+            break;
+        }
+    }
+
+    return v->address;
+}
+
+int munmap(uint64 va, int length) {
+    if (va + length >= MAXVA) {
+        return -1;
+    }
+
+    uint64 va_up = PGROUNDDOWN(va + length - 1);
+    va = PGROUNDDOWN(va);
+    struct proc* p = myproc();
+    for (int i = 0; i < 16; ++i) {
+        struct vma* v = &p->mmaped[i];
+        if (v->valid == 1 && va < v->address + v->length && v->address <= va) {
+            for (uint64 j = va; j <= va_up; j += PGSIZE) {
+                int to_free = 1 << ((j - v->address) / PGSIZE);
+                if (v->cnt & to_free) {
+                    v->cnt -= to_free;
+                }
+                else {
+                    continue;
+                }
+                if (v->flag == MAP_SHARED) {
+                    filewrite(v->file, v->address, v->length);
+                }
+                uvmunmap(p->pagetable, j, 1, 0);
+                if (v->cnt == 0) {
+                    v->valid = 0;
+                    fileclose(v->file);
+                }
+            }
+            break;
+        }
+    }
+    return 0;
+}

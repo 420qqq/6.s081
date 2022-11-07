@@ -3,8 +3,11 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -52,7 +55,42 @@ usertrap(void)
 
   if (r_scause() == 13 || r_scause() == 15) {
       uint64 va = r_stval();
-      
+      uint64 pa = 0;
+      if (va >= MAXVA) {
+          p->killed = 1;
+          exit(-1);
+      }
+      for (int i = 0; i < 16; ++i) {
+          struct vma* v = &p->mmaped[i];
+          if (v->valid == 1 && va < v->address + v->length && v->address <= va) {
+              pa = (uint64)kalloc();
+              memset((void*)pa, 0, PGSIZE);
+              va = PGROUNDDOWN(va);
+              uint len = v->address + v->length - va;
+              if (len > PGSIZE) {
+                  len = PGSIZE;
+              }
+              if (pa == 0) {
+                  panic("kalloc");
+              }
+              //begin_op();
+              ilock(v->file->ip);
+              readi(v->file->ip, 0, pa, va - v->address, len);
+              iunlock(v->file->ip);
+
+              if (mappages(p->pagetable, va, len, pa, PTE_A | PTE_U | v->permission) != 0) {
+                  kfree((void*)pa);
+                  p->killed = 1;
+              }
+              v->cnt |= 1 << ((va - v->address) / PGSIZE);
+
+              //end_op();
+              break;
+          }
+      }
+      if (pa == 0) {
+          p->killed = 1;
+      }
   } else if(r_scause() == 8){
     // system call
 

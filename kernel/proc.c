@@ -285,6 +285,14 @@ fork(void)
     return -1;
   }
 
+  for (i = 0; i < 16; ++i) {
+      struct vma* v = &p->mmaped[i];
+      if (v->valid) {
+          np->mmaped[i] = *v;
+          filedup(v->file);
+      }
+  }
+
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
@@ -355,6 +363,14 @@ exit(int status)
       fileclose(f);
       p->ofile[fd] = 0;
     }
+  }
+
+  for (int i = 0; i < 16; ++i) {
+      struct vma* v = &p->mmaped[i];
+      if (v->valid) {
+          munmap(v->address, v->length);
+          v->valid = 0;
+      }
   }
 
   begin_op();
